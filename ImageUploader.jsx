@@ -3,42 +3,145 @@ import emailjs from '@emailjs/browser';
 import JSZip from 'jszip';
 
 const ImageUploader = () => {
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [preview, setPreview] = useState(null);
+  const [selectedFiles, setSelectedFiles] = useState([]);
+  const [previews, setPreviews] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [email, setEmail] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [isScheduling, setIsScheduling] = useState(false);
+  const [scheduledTime, setScheduledTime] = useState('');
 
+  //shouldnt need these 
   const handleFileChange = (event) => {
-    const file = event.target.files[0];
-    setSelectedFile(file);
-    // Create preview URL
-    setPreview(file ? URL.createObjectURL(file) : null);
+    const files = Array.from(event.target.files);
+    setSelectedFiles(files);
+    // Create preview URLs
+    const previewUrls = files.map(file => URL.createObjectURL(file));
+    setPreviews(previewUrls);
   };
+
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    if (!selectedFile) return;
+    if (selectedFiles.length === 0) return;
 
     setIsLoading(true);
-    const formData = new FormData();
-    formData.append('image', selectedFile);
-
     try {
-      const response = await fetch('http://127.0.0.1:8000/colorize', {
-        method: 'POST',
-        body: formData,
-      });
+      const processedPreviews = [];
       
-      if (!response.ok) throw new Error('Network response was not ok');
+      for (const file of selectedFiles) {
+        const formData = new FormData();
+        formData.append('image', file);
+
+        const response = await fetch('http://127.0.0.1:8000/colorize', {
+          method: 'POST',
+          body: formData,
+        });
+        
+        if (!response.ok) throw new Error('Network response was not ok');
+        
+        const blob = await response.blob();
+        processedPreviews.push(URL.createObjectURL(blob));
+      }
       
-      const blob = await response.blob();
-      setPreview(URL.createObjectURL(blob));
+      setPreviews(processedPreviews);
     } catch (error) {
-      console.error('Error processing image:', error);
+      console.error('Error processing images:', error);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+ //send the email 
+  const handleEmailSend = async () => {
+    if (previews.length === 0 || !email) return;
+    
+    setIsSending(true);
+    try {
+      const zip = new JSZip();
+      
+      // Process all images
+      for (let i = 0; i < previews.length; i++) {
+        const response = await fetch(previews[i]);
+        const originalBlob = await response.blob();
+        const compressedBlob = await compressImage(originalBlob);
+        
+        // Add each compressed image to the zip with a unique name
+        zip.file(`processed-image-${i + 1}.jpg`, compressedBlob);
+      }
+      
+      const base64Content = await zip.generateAsync({
+        type: "base64",
+        compression: "DEFLATE",
+        compressionOptions: {
+          level: 9
+        }
+      });
+
+      const templateParams = {
+        to_email: email,
+        message: "Here are your processed images.",
+        attachment_name: "processed-images.zip",
+        attachment_data: base64Content
+      };
+
+      const result = await emailjs.send(
+        'service_270q8fl',
+        'template_kpkkahu',
+        templateParams,
+        'lhfP3lB03VJ6CTZUJ'
+      );
+
+      console.log('Email sent successfully:', result);
+      alert('Email sent successfully!');
+    } catch (error) {
+      console.error('Error sending email:', error);
+      alert('Failed to send email. Please try again.');
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  const createAndDownloadZip = async () => {
+    if (previews.length === 0) return;
+    
+    try {
+      const zip = new JSZip();
+      
+      // Process all images
+      for (let i = 0; i < previews.length; i++) {
+        const response = await fetch(previews[i]);
+        const originalBlob = await response.blob();
+        const compressedBlob = await compressImage(originalBlob);
+        
+        console.log(`Image ${i + 1} - Original size:`, originalBlob.size / 1024, 'KB');
+        console.log(`Image ${i + 1} - Compressed size:`, compressedBlob.size / 1024, 'KB');
+        
+        // Add each compressed image to the zip
+        zip.file(`processed-image-${i + 1}.jpg`, compressedBlob);
+      }
+      
+      // Generate zip with maximum compression
+      const zipBlob = await zip.generateAsync({
+        type: "blob",
+        compression: "DEFLATE",
+        compressionOptions: {
+          level: 9
+        }
+      });
+
+      // Create download link
+      const url = URL.createObjectURL(zipBlob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = "processed-images.zip";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error creating zip:', error);
+      alert('Failed to create zip file');
     }
   };
 
@@ -84,108 +187,27 @@ const ImageUploader = () => {
     });
   };
 
-  const createAndDownloadZip = async () => {
-    if (!preview) return;
-    
-    try {
-      const zip = new JSZip();
-      
-      // Fetch and compress the image
-      const response = await fetch(preview);
-      const originalBlob = await response.blob();
-      const compressedBlob = await compressImage(originalBlob);
-      
-      console.log('Original size:', originalBlob.size / 1024, 'KB');
-      console.log('Compressed size:', compressedBlob.size / 1024, 'KB');
-      
-      // Add the compressed image to the zip
-      zip.file("processed-image.jpg", compressedBlob);
-      
-      // Generate zip with maximum compression
-      const zipBlob = await zip.generateAsync({
-        type: "blob",
-        compression: "DEFLATE",
-        compressionOptions: {
-          level: 9
-        }
-      });
-
-      // Create download link
-      const url = URL.createObjectURL(zipBlob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = "processed-image.zip";
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error('Error creating zip:', error);
-      alert('Failed to create zip file');
-    }
-  };
-
-  const handleEmailSend = async () => {
-    if (!preview || !email) return;
-    
-    setIsSending(true);
-    try {
-      const zip = new JSZip();
-      
-      // Fetch and compress the image
-      const response = await fetch(preview);
-      const originalBlob = await response.blob();
-      const compressedBlob = await compressImage(originalBlob);
-      
-      // Add the compressed image to the zip
-      zip.file("processed-image.jpg", compressedBlob);
-      
-      const base64Content = await zip.generateAsync({
-        type: "base64",
-        compression: "DEFLATE",
-        compressionOptions: {
-          level: 9
-        }
-      });
-
-      const templateParams = {
-        to_email: email,
-        message: "Here is your processed image.",
-        attachment: {
-          name: "processed-image.zip",
-          data: base64Content,
-          type: "application/zip"
-        }
-      };
-
-      const result = await emailjs.send(
-        'service_270q8fl',
-        'template_kpkkahu',
-        templateParams,
-        'lhfP3lB03VJ6CTZUJ'
-      );
-
-      console.log('Email sent successfully:', result);
-      alert('Email sent successfully!');
-    } catch (error) {
-      console.error('Error sending email:', error);
-      alert('Failed to send email. Please try again.');
-    } finally {
-      setIsSending(false);
-    }
-  };
-
   const scheduleEmail = async () => {
-    if (!preview || !email) return;
+    if (previews.length === 0 || !email || !scheduledTime) return;
+    
+    const selectedTime = new Date(scheduledTime);
+    if (selectedTime <= new Date()) {
+      alert('Please select a future time');
+      return;
+    }
     
     setIsScheduling(true);
     try {
       const zip = new JSZip();
       
-      const responseSchedule = await fetch(preview);
-      const blob = await responseSchedule.blob();
-      
-      zip.file("processed-image.jpg", blob);
+      // Process all images
+      for (let i = 0; i < previews.length; i++) {
+        const response = await fetch(previews[i]);
+        const originalBlob = await response.blob();
+        const compressedBlob = await compressImage(originalBlob);
+        
+        zip.file(`processed-image-${i + 1}.jpg`, compressedBlob);
+      }
       
       const base64Content = await zip.generateAsync({
         type: "base64",
@@ -197,15 +219,20 @@ const ImageUploader = () => {
 
       const emailData = {
         email: email,
-        message: "Here is your processed image.",
-        attachment: {
-          name: "processed-image.zip",
-          data: base64Content,
-          type: "application/zip"
-        }
+        message: "Here are your processed images.",
+        attachment_name: "processed-images.zip",
+        attachment_data: base64Content,
+        scheduledTime: scheduledTime
       };
 
-      // Send to backend for scheduling
+      console.log(emailData)
+
+      console.log('Scheduling email with data:', {
+        email: emailData.email,
+        scheduledTime: emailData.scheduledTime,
+        hasAttachment: !!emailData.attachment_data
+      });
+
       const response = await fetch('http://localhost:3001/schedule-email', {
         method: 'POST',
         headers: {
@@ -218,7 +245,7 @@ const ImageUploader = () => {
         throw new Error('Failed to schedule email');
       }
 
-      alert('Email scheduled for 9 AM tomorrow!');
+      alert(`Email scheduled for ${new Date(scheduledTime).toLocaleString()}`);
     } catch (error) {
       console.error('Error scheduling email:', error);
       alert('Failed to schedule email. Please try again.');
@@ -234,16 +261,26 @@ const ImageUploader = () => {
           type="file"
           onChange={handleFileChange}
           accept="image/*"
+          multiple  // Add this to allow multiple file selection
         />
-        <button type="submit" disabled={!selectedFile || isLoading}>
-          {isLoading ? 'Processing...' : 'Process Image'}
+        <button type="submit" disabled={selectedFiles.length === 0 || isLoading}>
+          {isLoading ? 'Processing...' : 'Process Images'}
         </button>
       </form>
 
-      {preview && (
+      {previews.length > 0 && (
         <div>
-          <h3>Image Preview:</h3>
-          <img src={preview} alt="Preview" style={{maxWidth: '300px'}} />
+          <h3>Image Previews:</h3>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+            {previews.map((preview, index) => (
+              <img 
+                key={index} 
+                src={preview} 
+                alt={`Preview ${index + 1}`} 
+                style={{maxWidth: '300px'}} 
+              />
+            ))}
+          </div>
           
           <div style={{marginTop: '20px'}}>
             <button 
@@ -260,6 +297,15 @@ const ImageUploader = () => {
               placeholder="Enter email address"
               style={{marginRight: '10px'}}
             />
+
+            <input
+              type="datetime-local"
+              value={scheduledTime}
+              onChange={(e) => setScheduledTime(e.target.value)}
+              style={{marginRight: '10px'}}
+              min={new Date().toISOString().slice(0, 16)} // Prevents selecting past times
+            />
+
             <button 
               onClick={handleEmailSend}
               disabled={!email || isSending}
@@ -267,11 +313,12 @@ const ImageUploader = () => {
             >
               {isSending ? 'Sending...' : 'Send Now'}
             </button>
+
             <button 
               onClick={scheduleEmail}
-              disabled={!email || isScheduling}
+              disabled={!email || isScheduling || !scheduledTime}
             >
-              {isScheduling ? 'Scheduling...' : 'Schedule for 9 AM'}
+              {isScheduling ? 'Scheduling...' : 'Schedule Email'}
             </button>
           </div>
         </div>

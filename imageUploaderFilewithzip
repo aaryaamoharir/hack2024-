@@ -1,0 +1,165 @@
+import React, { useState } from 'react';
+import emailjs from '@emailjs/browser';
+import JSZip from 'jszip';
+
+const ImageUploader = () => {
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [email, setEmail] = useState('');
+  const [isSending, setIsSending] = useState(false);
+  const [zipUrl, setZipUrl] = useState(null);
+
+  const handleFileChange = (event) => {
+    const file = event.target.files[0];
+    setSelectedFile(file);
+    // Create preview URL
+    setPreview(file ? URL.createObjectURL(file) : null);
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    if (!selectedFile) return;
+
+    setIsLoading(true);
+    const formData = new FormData();
+    formData.append('image', selectedFile);
+
+    try {
+      const response = await fetch('http://127.0.0.1:8000/colorize', {
+        method: 'POST',
+        body: formData,
+      });
+      
+      if (!response.ok) throw new Error('Network response was not ok');
+      
+      const blob = await response.blob();
+      setPreview(URL.createObjectURL(blob));
+    } catch (error) {
+      console.error('Error processing image:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const createAndDownloadZip = async () => {
+    try {
+      const zip = new JSZip();
+      
+      // Fetch the image
+      const response = await fetch(preview);
+      const blob = await response.blob();
+      
+      // Add the image to the zip
+      zip.file("processed-image.jpg", blob);
+      
+      // Generate zip content as a Blob
+      const zipBlob = await zip.generateAsync({
+        type: "blob",
+        compression: "DEFLATE",
+        compressionOptions: {
+          level: 9
+        }
+      });
+
+      // Create URL for the zip file
+      const zipUrl = URL.createObjectURL(zipBlob);
+      setZipUrl(zipUrl);
+
+      // Create and click a temporary download link
+      const link = document.createElement('a');
+      link.href = zipUrl;
+      link.download = "processed-image.zip";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (error) {
+      console.error('Error creating zip:', error);
+      alert('Failed to create zip file');
+    }
+  };
+
+  const handleEmailSend = async () => {
+    if (!preview || !email) return;
+    
+    setIsSending(true);
+    try {
+      // Create zip file with the processed image
+      const zipContent = await createAndDownloadZip();
+      
+      const templateParams = {
+        to_email: email,
+        message: "Here is your processed image. The image is attached as a ZIP file.",
+        // EmailJS attachment format
+        attachment: {
+          data: zipContent,
+          name: "processed-image.zip",
+          type: "application/zip"
+        }
+      };
+
+      console.log('Sending email with attachment...');
+      const result = await emailjs.send(
+        'service_270q8fl',
+        'template_kpkkahu',
+        templateParams,
+        'lhfP3lB03VJ6CTZUJ'
+      );
+
+      console.log('Email sent successfully:', result);
+      alert('Email sent successfully!');
+    } catch (error) {
+      console.error('Error sending email:', error);
+      alert('Failed to send email. Please try again.');
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  return (
+    <div>
+      <form onSubmit={handleSubmit}>
+        <input
+          type="file"
+          onChange={handleFileChange}
+          accept="image/*"
+        />
+        <button type="submit" disabled={!selectedFile || isLoading}>
+          {isLoading ? 'Processing...' : 'Process Image'}
+        </button>
+      </form>
+
+      {preview && (
+        <div>
+          <h3>Image Preview:</h3>
+          <img src={preview} alt="Preview" style={{maxWidth: '300px'}} />
+          
+          <div style={{marginTop: '20px'}}>
+            <button 
+              onClick={createAndDownloadZip}
+              style={{marginRight: '10px'}}
+            >
+              Download as ZIP
+            </button>
+
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Enter email address"
+              style={{marginRight: '10px'}}
+            />
+            <button 
+              onClick={handleEmailSend}
+              disabled={!email || isSending}
+            >
+              {isSending ? 'Sending...' : 'Send via Email'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default ImageUploader;

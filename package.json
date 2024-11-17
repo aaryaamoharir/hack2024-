@@ -1,0 +1,14 @@
+{
+    "name": "email-scheduler-server",
+    "version": "1.0.0",
+    "main": "index.js",
+    "dependencies": {
+      "@emailjs/browser": "^3.11.0",
+      "cors": "^2.8.5",
+      "express": "^4.18.2",
+      "node-cron": "^3.0.2"
+    },
+    "scripts": {
+      "start": "node index.js"
+    }
+  }
